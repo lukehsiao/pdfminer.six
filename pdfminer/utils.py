@@ -1,91 +1,49 @@
-
+#!/usr/bin/env python
 """
 Miscellaneous Routines.
 """
 import struct
-# from sys import maxint as INF #doesn't work anymore under Python3,
-# but PDF still uses 32 bits ints
-INF = (1<<31) - 1
+from sys import maxint as INF
 
-import six  #Python 2+3 compatibility
-
-if six.PY3:
-    import chardet  # For str encoding detection in Py3
-    unicode = str
-
-def make_compat_bytes(in_str):
-    "In Py2, does nothing. In Py3, converts to bytes, encoding to unicode."
-    assert isinstance(in_str, str), str(type(in_str))
-    if six.PY2:
-        return in_str
-    else:
-        return in_str.encode()
-
-def make_compat_str(in_str):
-    "In Py2, does nothing. In Py3, converts to string, guessing encoding."
-    assert isinstance(in_str, (bytes, str, unicode)), str(type(in_str))
-    if six.PY3 and isinstance(in_str, bytes):
-        enc = chardet.detect(in_str)
-        in_str = in_str.decode(enc['encoding'])
-    return in_str
-
-def compatible_encode_method(bytesorstring, encoding='utf-8', erraction='ignore'):
-    "When Py2 str.encode is called, it often means bytes.encode in Py3. This does either."
-    if six.PY2:
-        assert isinstance(bytesorstring, (str, unicode)), str(type(bytesorstring))
-        return bytesorstring.encode(encoding, erraction)
-    if six.PY3:
-        if isinstance(bytesorstring, str): return bytesorstring
-        assert isinstance(bytesorstring, bytes), str(type(bytesorstring))
-        return bytesorstring.decode(encoding, erraction)
 
 ##  PNG Predictor
 ##
 def apply_png_predictor(pred, colors, columns, bitspercomponent, data):
     if bitspercomponent != 8:
         # unsupported
-        raise ValueError("Unsupported `bitspercomponent': %d" %
-                         bitspercomponent)
-    nbytes = colors * columns * bitspercomponent // 8
+        raise ValueError(bitspercomponent)
+    nbytes = colors*columns*bitspercomponent//8
     i = 0
-    buf = b''
-    line0 = b'\x00' * columns
-    for i in range(0, len(data), nbytes+1):
+    buf = ''
+    line0 = '\x00' * columns
+    for i in xrange(0, len(data), nbytes+1):
         ft = data[i]
-        if six.PY2:
-            ft = six.byte2int(ft)
         i += 1
         line1 = data[i:i+nbytes]
-        line2 = b''
-        if ft == 0:
+        line2 = ''
+        if ft == '\x00':
             # PNG none
             line2 += line1
-        elif ft == 1:
+        elif ft == '\x01':
             # PNG sub (UNTESTED)
             c = 0
             for b in line1:
-                if six.PY2:
-                    b = six.byte2int(b)
-                c = (c+b) & 255
-                line2 += six.int2byte(c)
-        elif ft == 2:
+                c = (c+ord(b)) & 255
+                line2 += chr(c)
+        elif ft == '\x02':
             # PNG up
             for (a, b) in zip(line0, line1):
-                if six.PY2:
-                    a, b = six.byte2int(a), six.byte2int(b)
-                c = (a+b) & 255
-                line2 += six.int2byte(c)
-        elif ft == 3:
+                c = (ord(a)+ord(b)) & 255
+                line2 += chr(c)
+        elif ft == '\x03':
             # PNG average (UNTESTED)
             c = 0
             for (a, b) in zip(line0, line1):
-                if six.PY2:
-                    a, b = six.byte2int(a), six.byte2int(b)
-                c = ((c+a+b)//2) & 255
-                line2 += six.int2byte(c)
+                c = ((c+ord(a)+ord(b))//2) & 255
+                line2 += chr(c)
         else:
             # unsupported
-            raise ValueError("Unsupported predictor value: %d" % ft)
+            raise ValueError(ft)
         buf += line2
         line0 = line2
     return buf
@@ -96,42 +54,37 @@ def apply_png_predictor(pred, colors, columns, bitspercomponent, data):
 MATRIX_IDENTITY = (1, 0, 0, 1, 0, 0)
 
 
-def mult_matrix(m1, m0):
-    (a1, b1, c1, d1, e1, f1) = m1
-    (a0, b0, c0, d0, e0, f0) = m0
+def mult_matrix((a1, b1, c1, d1, e1, f1), (a0, b0, c0, d0, e0, f0)):
     """Returns the multiplication of two matrices."""
     return (a0*a1+c0*b1,    b0*a1+d0*b1,
             a0*c1+c0*d1,    b0*c1+d0*d1,
             a0*e1+c0*f1+e0, b0*e1+d0*f1+f0)
 
 
-def translate_matrix(m, v):
+def translate_matrix((a, b, c, d, e, f), (x, y)):
     """Translates a matrix by (x, y)."""
-    (a, b, c, d, e, f) = m
-    (x, y) = v
     return (a, b, c, d, x*a+y*c+e, x*b+y*d+f)
 
 
-def apply_matrix_pt(m, v):
-    (a, b, c, d, e, f) = m
-    (x, y) = v
+def apply_matrix_pt((a, b, c, d, e, f), (x, y)):
     """Applies a matrix to a point."""
     return (a*x+c*y+e, b*x+d*y+f)
 
 
-def apply_matrix_norm(m, v):
+def apply_matrix_norm((a, b, c, d, e, f), (p, q)):
     """Equivalent to apply_matrix_pt(M, (p,q)) - apply_matrix_pt(M, (0,0))"""
-    (a, b, c, d, e, f) = m
-    (p, q) = v
     return (a*p+c*q, b*p+d*q)
 
+def is_diagonal(mat):
+    """Check if matrix does any rotation"""
+    return mat[0] > 0 and mat[3] > 0 and int(mat[1]) == 0 and int(mat[2]) == 0
 
 ##  Utility functions
 ##
 
 # isnumber
 def isnumber(x):
-    return isinstance(x, (six.integer_types, float))
+    return isinstance(x, (int, long, float))
 
 # uniq
 def uniq(objs):
@@ -146,7 +99,7 @@ def uniq(objs):
 
 
 # csort
-def csort(objs, key):
+def csort(objs, key=lambda x: x):
     """Order-preserving sorting function."""
     idxs = dict((obj, i) for (i, obj) in enumerate(objs))
     return sorted(objs, key=lambda obj: (key(obj), idxs[obj]))
@@ -168,8 +121,8 @@ def fsplit(pred, objs):
 # drange
 def drange(v0, v1, d):
     """Returns a discrete range."""
-    assert v0 < v1, str((v0, v1, d))
-    return range(int(v0)//d, int(v1+d)//d)
+    assert v0 <= v1
+    return xrange(int(v0)//d, int(v1+d)//d)
 
 
 # get_bound
@@ -209,7 +162,7 @@ def choplist(n, seq):
 
 # nunpack
 def nunpack(s, default=0):
-    """Unpacks 1 to 4 or 8 byte integers (big endian)."""
+    """Unpacks 1 to 4 byte integers (big endian)."""
     l = len(s)
     if not l:
         return default
@@ -218,17 +171,15 @@ def nunpack(s, default=0):
     elif l == 2:
         return struct.unpack('>H', s)[0]
     elif l == 3:
-        return struct.unpack('>L', b'\x00'+s)[0]
+        return struct.unpack('>L', '\x00'+s)[0]
     elif l == 4:
         return struct.unpack('>L', s)[0]
-    elif l == 8:
-        return struct.unpack('>Q', s)[0]
     else:
         raise TypeError('invalid length: %d' % l)
 
 
 # decode_text
-PDFDocEncoding = ''.join(six.unichr(x) for x in (
+PDFDocEncoding = ''.join(unichr(x) for x in (
     0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007,
     0x0008, 0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x000e, 0x000f,
     0x0010, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0017, 0x0017,
@@ -266,54 +217,26 @@ PDFDocEncoding = ''.join(six.unichr(x) for x in (
 
 def decode_text(s):
     """Decodes a PDFDocEncoding string to Unicode."""
-    if s.startswith(b'\xfe\xff'):
-        return six.text_type(s[2:], 'utf-16be', 'ignore')
+    if s.startswith('\xfe\xff'):
+        return unicode(s[2:], 'utf-16be', 'ignore')
     else:
-        return ''.join(PDFDocEncoding[c] for c in s)
+        return ''.join(PDFDocEncoding[ord(c)] for c in s)
 
 
 # enc
 def enc(x, codec='ascii'):
     """Encodes a string for SGML/XML/HTML"""
-    if isinstance(x, bytes):
-        return ''
     x = x.replace('&', '&amp;').replace('>', '&gt;').replace('<', '&lt;').replace('"', '&quot;')
-    if codec:
-        x = x.encode(codec, 'xmlcharrefreplace')
-    return x
+    return x.encode(codec, 'xmlcharrefreplace')
 
 
-def bbox2str(bbox):
-    (x0, y0, x1, y1) = bbox
+def bbox2str((x0, y0, x1, y1)):
     return '%.3f,%.3f,%.3f,%.3f' % (x0, y0, x1, y1)
 
 
-def matrix2str(m):
-    (a, b, c, d, e, f) = m
+def matrix2str((a, b, c, d, e, f)):
     return '[%.2f,%.2f,%.2f,%.2f, (%.2f,%.2f)]' % (a, b, c, d, e, f)
 
-def vecBetweenBoxes(obj1, obj2):
-    """A distance function between two TextBoxes.
-
-    Consider the bounding rectangle for obj1 and obj2.
-    Return vector between 2 boxes boundaries if they don't overlap, otherwise returns vector betweeen boxes centers
-             +------+..........+ (x1, y1)
-             | obj1 |          :
-             +------+www+------+
-             :          | obj2 |
-    (x0, y0) +..........+------+
-    """
-    (x0, y0) = (min(obj1.x0, obj2.x0), min(obj1.y0, obj2.y0))
-    (x1, y1) = (max(obj1.x1, obj2.x1), max(obj1.y1, obj2.y1))
-    (ow, oh) = (x1-x0, y1-y0)
-    (iw, ih) = (ow-obj1.width-obj2.width, oh-obj1.height-obj2.height)
-    if iw<0 and ih<0:
-        # if one is inside another we compute euclidean distance
-        (xc1, yc1) = ( (obj1.x0+obj1.x1)/2, (obj1.y0+obj1.y1)/2 )
-        (xc2, yc2) = ( (obj2.x0+obj2.x1)/2, (obj2.y0+obj2.y1)/2 )
-        return (xc1-xc2, yc1-yc2)
-    else:
-        return (max(0, iw), max(0, ih))
 
 ##  Plane
 ##
@@ -325,7 +248,6 @@ def vecBetweenBoxes(obj1, obj2):
 class Plane(object):
 
     def __init__(self, bbox, gridsize=50):
-        self._seq = []          # preserve the object order.
         self._objs = set()
         self._grid = {}
         self.gridsize = gridsize
@@ -336,7 +258,7 @@ class Plane(object):
         return ('<Plane objs=%r>' % list(self))
 
     def __iter__(self):
-        return ( obj for obj in self._seq if obj in self._objs )
+        return iter(self._objs)
 
     def __len__(self):
         return len(self._objs)
@@ -344,8 +266,7 @@ class Plane(object):
     def __contains__(self, obj):
         return obj in self._objs
 
-    def _getrange(self, bbox):
-        (x0, y0, x1, y1) = bbox
+    def _getrange(self, (x0, y0, x1, y1)):
         if (x1 <= self.x0 or self.x1 <= x0 or
             y1 <= self.y0 or self.y1 <= y0): return
         x0 = max(self.x0, x0)
@@ -372,7 +293,6 @@ class Plane(object):
             else:
                 r = self._grid[k]
             r.append(obj)
-        self._seq.append(obj)
         self._objs.add(obj)
         return
 
@@ -387,10 +307,9 @@ class Plane(object):
         return
 
     # find(): finds objects that are in a certain area.
-    def find(self, bbox):
-        (x0, y0, x1, y1) = bbox
+    def find(self, (x0, y0, x1, y1)):
         done = set()
-        for k in self._getrange(bbox):
+        for k in self._getrange((x0, y0, x1, y1)):
             if k not in self._grid:
                 continue
             for obj in self._grid[k]:

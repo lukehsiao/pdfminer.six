@@ -1,16 +1,9 @@
 #!/usr/bin/env python
-
-# -*- coding: utf-8 -*-
-
+import sys
 import re
-import logging
+from utils import choplist
 
-import six  # Python 2+3 compatibility
-
-from . import settings
-from .utils import choplist
-
-log = logging.getLogger(__name__)
+STRICT = 0
 
 
 ##  PS Exceptions
@@ -64,10 +57,10 @@ class PSLiteral(PSObject):
 
     def __init__(self, name):
         self.name = name
+        return
 
     def __repr__(self):
-        name=self.name
-        return '/%r' % name
+        return '/%s' % self.name
 
 
 ##  PSKeyword
@@ -89,8 +82,7 @@ class PSKeyword(PSObject):
         return
 
     def __repr__(self):
-        name=self.name
-        return '/%r' % name
+        return self.name
 
 
 ##  PSSymbolTable
@@ -119,56 +111,46 @@ PSLiteralTable = PSSymbolTable(PSLiteral)
 PSKeywordTable = PSSymbolTable(PSKeyword)
 LIT = PSLiteralTable.intern
 KWD = PSKeywordTable.intern
-KEYWORD_PROC_BEGIN = KWD(b'{')
-KEYWORD_PROC_END = KWD(b'}')
-KEYWORD_ARRAY_BEGIN = KWD(b'[')
-KEYWORD_ARRAY_END = KWD(b']')
-KEYWORD_DICT_BEGIN = KWD(b'<<')
-KEYWORD_DICT_END = KWD(b'>>')
+KEYWORD_PROC_BEGIN = KWD('{')
+KEYWORD_PROC_END = KWD('}')
+KEYWORD_ARRAY_BEGIN = KWD('[')
+KEYWORD_ARRAY_END = KWD(']')
+KEYWORD_DICT_BEGIN = KWD('<<')
+KEYWORD_DICT_END = KWD('>>')
 
 
 def literal_name(x):
     if not isinstance(x, PSLiteral):
-        if settings.STRICT:
-            raise PSTypeError('Literal required: %r' % (x,))
+        if STRICT:
+            raise PSTypeError('Literal required: %r' % x)
         else:
-            name=x
-    else:
-        name=x.name
-        if six.PY3:
-            try:
-                name = str(name,'utf-8')
-            except:
-                pass
-    return name
+            return str(x)
+    return x.name
+
 
 def keyword_name(x):
     if not isinstance(x, PSKeyword):
-        if settings.STRICT:
+        if STRICT:
             raise PSTypeError('Keyword required: %r' % x)
         else:
-            name=x
-    else:
-        name=x.name
-        if six.PY3:
-            name = str(name,'utf-8','ignore')
-    return name
+            return str(x)
+    return x.name
 
 
 ##  PSBaseParser
 ##
-EOL = re.compile(br'[\r\n]')
-SPC = re.compile(br'\s')
-NONSPC = re.compile(br'\S')
-HEX = re.compile(br'[0-9a-fA-F]')
-END_LITERAL = re.compile(br'[#/%\[\]()<>{}\s]')
-END_HEX_STRING = re.compile(br'[^\s0-9a-fA-F]')
-HEX_PAIR = re.compile(br'[0-9a-fA-F]{2}|.')
-END_NUMBER = re.compile(br'[^0-9]')
-END_KEYWORD = re.compile(br'[#/%\[\]()<>{}\s]')
-END_STRING = re.compile(br'[()\134]')
-OCT_STRING = re.compile(br'[0-7]')
-ESC_STRING = {b'b': 8, b't': 9, b'n': 10, b'f': 12, b'r': 13, b'(': 40, b')': 41, b'\\': 92}
+EOL = re.compile(r'[\r\n]')
+SPC = re.compile(r'\s')
+NONSPC = re.compile(r'\S')
+HEX = re.compile(r'[0-9a-fA-F]')
+END_LITERAL = re.compile(r'[#/%\[\]()<>{}\s]')
+END_HEX_STRING = re.compile(r'[^\s0-9a-fA-F]')
+HEX_PAIR = re.compile(r'[0-9a-fA-F]{2}|.')
+END_NUMBER = re.compile(r'[^0-9]')
+END_KEYWORD = re.compile(r'[#/%\[\]()<>{}\s]')
+END_STRING = re.compile(r'[()\134]')
+OCT_STRING = re.compile(r'[0-7]')
+ESC_STRING = {'b': 8, 't': 9, 'n': 10, 'f': 12, 'r': 13, '(': 40, ')': 41, '\\': 92}
 
 
 class PSBaseParser(object):
@@ -176,6 +158,8 @@ class PSBaseParser(object):
     """Most basic PostScript parser that performs only tokenization.
     """
     BUFSIZ = 4096
+
+    debug = 0
 
     def __init__(self, fp):
         self.fp = fp
@@ -200,22 +184,23 @@ class PSBaseParser(object):
         if not pos:
             pos = self.bufpos+self.charpos
         self.fp.seek(pos)
-        log.info('poll(%d): %r', pos, self.fp.read(n))
+        print >>sys.stderr, 'poll(%d): %r' % (pos, self.fp.read(n))
         self.fp.seek(pos0)
         return
 
     def seek(self, pos):
         """Seeks the parser to the given position.
         """
-        log.debug('seek: %r', pos)
+        if 2 <= self.debug:
+            print >>sys.stderr, 'seek: %r' % pos
         self.fp.seek(pos)
         # reset the status for nextline()
         self.bufpos = pos
-        self.buf = b''
+        self.buf = ''
         self.charpos = 0
         # reset the status for nexttoken()
         self._parse1 = self._parse_main
-        self._curtoken = b''
+        self._curtoken = ''
         self._curtokenpos = 0
         self._tokens = []
         return
@@ -234,15 +219,15 @@ class PSBaseParser(object):
     def nextline(self):
         """Fetches a next line that ends either with \\r or \\n.
         """
-        linebuf = b''
+        linebuf = ''
         linepos = self.bufpos + self.charpos
         eol = False
         while 1:
             self.fillbuf()
             if eol:
-                c = self.buf[self.charpos:self.charpos+1]
-                # handle b'\r\n'
-                if c == b'\n':
+                c = self.buf[self.charpos]
+                # handle '\r\n'
+                if c == '\n':
                     linebuf += c
                     self.charpos += 1
                 break
@@ -250,15 +235,15 @@ class PSBaseParser(object):
             if m:
                 linebuf += self.buf[self.charpos:m.end(0)]
                 self.charpos = m.end(0)
-                if linebuf[-1:] == b'\r':
+                if linebuf[-1] == '\r':
                     eol = True
                 else:
                     break
             else:
                 linebuf += self.buf[self.charpos:]
                 self.charpos = len(self.buf)
-        log.debug('nextline: %r, %r', linepos, linebuf)
-
+        if 2 <= self.debug:
+            print >>sys.stderr, 'nextline: %r' % ((linepos, linebuf),)
         return (linepos, linebuf)
 
     def revreadlines(self):
@@ -268,7 +253,7 @@ class PSBaseParser(object):
         """
         self.fp.seek(0, 2)
         pos = self.fp.tell()
-        buf = b''
+        buf = ''
         while 0 < pos:
             prevpos = pos
             pos = max(0, pos-self.BUFSIZ)
@@ -277,13 +262,13 @@ class PSBaseParser(object):
             if not s:
                 break
             while 1:
-                n = max(s.rfind(b'\r'), s.rfind(b'\n'))
+                n = max(s.rfind('\r'), s.rfind('\n'))
                 if n == -1:
                     buf = s + buf
                     break
-                yield s[n:] + buf
+                yield s[n:]+buf
                 s = s[:n]
-                buf = b''
+                buf = ''
         return
 
     def _parse_main(self, s, i):
@@ -291,21 +276,21 @@ class PSBaseParser(object):
         if not m:
             return len(s)
         j = m.start(0)
-        c = s[j:j+1]
+        c = s[j]
         self._curtokenpos = self.bufpos+j
-        if c == b'%':
-            self._curtoken = b'%'
+        if c == '%':
+            self._curtoken = '%'
             self._parse1 = self._parse_comment
             return j+1
-        elif c == b'/':
-            self._curtoken = b''
+        elif c == '/':
+            self._curtoken = ''
             self._parse1 = self._parse_literal
             return j+1
-        elif c in b'-+' or c.isdigit():
+        elif c in '-+' or c.isdigit():
             self._curtoken = c
             self._parse1 = self._parse_number
             return j+1
-        elif c == b'.':
+        elif c == '.':
             self._curtoken = c
             self._parse1 = self._parse_float
             return j+1
@@ -313,17 +298,17 @@ class PSBaseParser(object):
             self._curtoken = c
             self._parse1 = self._parse_keyword
             return j+1
-        elif c == b'(':
-            self._curtoken = b''
+        elif c == '(':
+            self._curtoken = ''
             self.paren = 1
             self._parse1 = self._parse_string
             return j+1
-        elif c == b'<':
-            self._curtoken = b''
+        elif c == '<':
+            self._curtoken = ''
             self._parse1 = self._parse_wopen
             return j+1
-        elif c == b'>':
-            self._curtoken = b''
+        elif c == '>':
+            self._curtoken = ''
             self._parse1 = self._parse_wclose
             return j+1
         else:
@@ -353,26 +338,22 @@ class PSBaseParser(object):
             return len(s)
         j = m.start(0)
         self._curtoken += s[i:j]
-        c = s[j:j+1]
-        if c == b'#':
-            self.hex = b''
+        c = s[j]
+        if c == '#':
+            self.hex = ''
             self._parse1 = self._parse_literal_hex
             return j+1
-        try:
-            self._curtoken=str(self._curtoken,'utf-8')
-        except:
-            pass
         self._add_token(LIT(self._curtoken))
         self._parse1 = self._parse_main
         return j
 
     def _parse_literal_hex(self, s, i):
-        c = s[i:i+1]
+        c = s[i]
         if HEX.match(c) and len(self.hex) < 2:
             self.hex += c
             return i+1
         if self.hex:
-            self._curtoken += six.int2byte(int(self.hex, 16))
+            self._curtoken += chr(int(self.hex, 16))
         self._parse1 = self._parse_literal
         return i
 
@@ -383,8 +364,8 @@ class PSBaseParser(object):
             return len(s)
         j = m.start(0)
         self._curtoken += s[i:j]
-        c = s[j:j+1]
-        if c == b'.':
+        c = s[j]
+        if c == '.':
             self._curtoken += c
             self._parse1 = self._parse_float
             return j+1
@@ -416,9 +397,9 @@ class PSBaseParser(object):
             return len(s)
         j = m.start(0)
         self._curtoken += s[i:j]
-        if self._curtoken == b'true':
+        if self._curtoken == 'true':
             token = True
-        elif self._curtoken == b'false':
+        elif self._curtoken == 'false':
             token = False
         else:
             token = KWD(self._curtoken)
@@ -433,16 +414,16 @@ class PSBaseParser(object):
             return len(s)
         j = m.start(0)
         self._curtoken += s[i:j]
-        c = s[j:j+1]
-        if c == b'\\':
-            self.oct = b''
+        c = s[j]
+        if c == '\\':
+            self.oct = ''
             self._parse1 = self._parse_string_1
             return j+1
-        if c == b'(':
+        if c == '(':
             self.paren += 1
             self._curtoken += c
             return j+1
-        if c == b')':
+        if c == ')':
             self.paren -= 1
             if self.paren:  # WTF, they said balanced parens need no special treatment.
                 self._curtoken += c
@@ -452,22 +433,22 @@ class PSBaseParser(object):
         return j+1
 
     def _parse_string_1(self, s, i):
-        c = s[i:i+1]
+        c = s[i]
         if OCT_STRING.match(c) and len(self.oct) < 3:
             self.oct += c
             return i+1
         if self.oct:
-            self._curtoken += six.int2byte(int(self.oct, 8))
+            self._curtoken += chr(int(self.oct, 8))
             self._parse1 = self._parse_string
             return i
         if c in ESC_STRING:
-            self._curtoken += six.int2byte(ESC_STRING[c])
+            self._curtoken += chr(ESC_STRING[c])
         self._parse1 = self._parse_string
         return i+1
 
     def _parse_wopen(self, s, i):
-        c = s[i:i+1]
-        if c == b'<':
+        c = s[i]
+        if c == '<':
             self._add_token(KEYWORD_DICT_BEGIN)
             self._parse1 = self._parse_main
             i += 1
@@ -476,8 +457,8 @@ class PSBaseParser(object):
         return i
 
     def _parse_wclose(self, s, i):
-        c = s[i:i+1]
-        if c == b'>':
+        c = s[i]
+        if c == '>':
             self._add_token(KEYWORD_DICT_END)
             i += 1
         self._parse1 = self._parse_main
@@ -490,7 +471,8 @@ class PSBaseParser(object):
             return len(s)
         j = m.start(0)
         self._curtoken += s[i:j]
-        token = HEX_PAIR.sub(lambda m: six.int2byte(int(m.group(0), 16)),SPC.sub(b'', self._curtoken))
+        token = HEX_PAIR.sub(lambda m: chr(int(m.group(0), 16)),
+                             SPC.sub('', self._curtoken))
         self._add_token(token)
         self._parse1 = self._parse_main
         return j
@@ -500,7 +482,8 @@ class PSBaseParser(object):
             self.fillbuf()
             self.charpos = self._parse1(self.buf, self.charpos)
         token = self._tokens.pop(0)
-        log.debug('nexttoken: %r', token)
+        if 2 <= self.debug:
+            print >>sys.stderr, 'nexttoken: %r' % (token,)
         return token
 
 
@@ -540,17 +523,16 @@ class PSStackParser(PSBaseParser):
         return objs
 
     def add_results(self, *objs):
-        try:
-            log.debug('add_results: %r', objs)
-        except:
-            log.debug('add_results: (unprintable object)')
+        if 2 <= self.debug:
+            print >>sys.stderr, 'add_results: %r' % (objs,)
         self.results.extend(objs)
         return
 
     def start_type(self, pos, type):
         self.context.append((pos, self.curtype, self.curstack))
         (self.curtype, self.curstack) = (type, [])
-        log.debug('start_type: pos=%r, type=%r', pos, type)
+        if 2 <= self.debug:
+            print >>sys.stderr, 'start_type: pos=%r, type=%r' % (pos, type)
         return
 
     def end_type(self, type):
@@ -558,7 +540,8 @@ class PSStackParser(PSBaseParser):
             raise PSTypeError('Type mismatch: %r != %r' % (self.curtype, type))
         objs = [obj for (_, obj) in self.curstack]
         (pos, self.curtype, self.curstack) = self.context.pop()
-        log.debug('end_type: pos=%r, type=%r, objs=%r', pos, type, objs)
+        if 2 <= self.debug:
+            print >>sys.stderr, 'end_type: pos=%r, type=%r, objs=%r' % (pos, type, objs)
         return (pos, objs)
 
     def do_keyword(self, pos, token):
@@ -573,7 +556,7 @@ class PSStackParser(PSBaseParser):
         while not self.results:
             (pos, token) = self.nexttoken()
             #print (pos,token), (self.curtype, self.curstack)
-            if isinstance(token, (six.integer_types, float, bool, six.string_types, six.binary_type, PSLiteral)):
+            if isinstance(token, (int, long, float, bool, str, PSLiteral)):
                 # normal token
                 self.push((pos, token))
             elif token == KEYWORD_ARRAY_BEGIN:
@@ -584,7 +567,7 @@ class PSStackParser(PSBaseParser):
                 try:
                     self.push(self.end_type('a'))
                 except PSTypeError:
-                    if settings.STRICT:
+                    if STRICT:
                         raise
             elif token == KEYWORD_DICT_BEGIN:
                 # begin dictionary
@@ -599,7 +582,7 @@ class PSStackParser(PSBaseParser):
                     d = dict((literal_name(k), v) for (k, v) in choplist(2, objs) if v is not None)
                     self.push((pos, d))
                 except PSTypeError:
-                    if settings.STRICT:
+                    if STRICT:
                         raise
             elif token == KEYWORD_PROC_BEGIN:
                 # begin proc
@@ -609,22 +592,117 @@ class PSStackParser(PSBaseParser):
                 try:
                     self.push(self.end_type('p'))
                 except PSTypeError:
-                    if settings.STRICT:
+                    if STRICT:
                         raise
-            elif isinstance(token,PSKeyword):
-                log.debug('do_keyword: pos=%r, token=%r, stack=%r', pos, token, self.curstack)
-                self.do_keyword(pos, token)
             else:
-                log.error('unknown token: pos=%r, token=%r, stack=%r', pos, token, self.curstack)
+                if 2 <= self.debug:
+                    print >>sys.stderr, 'do_keyword: pos=%r, token=%r, stack=%r' % \
+                          (pos, token, self.curstack)
                 self.do_keyword(pos, token)
-                raise
             if self.context:
                 continue
             else:
                 self.flush()
         obj = self.results.pop(0)
-        try:
-            log.debug('nextobject: %r', obj)
-        except:
-            log.debug('nextobject: (unprintable object)')
+        if 2 <= self.debug:
+            print >>sys.stderr, 'nextobject: %r' % (obj,)
         return obj
+
+
+import unittest
+
+
+##  Simplistic Test cases
+##
+class TestPSBaseParser(unittest.TestCase):
+
+    TESTDATA = r'''%!PS
+begin end
+ "  @ #
+/a/BCD /Some_Name /foo#5f#xbaa
+0 +1 -2 .5 1.234
+(abc) () (abc ( def ) ghi)
+(def\040\0\0404ghi) (bach\\slask) (foo\nbaa)
+(this % is not a comment.)
+(foo
+baa)
+(foo\
+baa)
+<> <20> < 40 4020 >
+<abcd00
+12345>
+func/a/b{(c)do*}def
+[ 1 (z) ! ]
+<< /foo (bar) >>
+'''
+
+    TOKENS = [
+      (5, KWD('begin')), (11, KWD('end')), (16, KWD('"')), (19, KWD('@')),
+      (21, KWD('#')), (23, LIT('a')), (25, LIT('BCD')), (30, LIT('Some_Name')),
+      (41, LIT('foo_xbaa')), (54, 0), (56, 1), (59, -2), (62, 0.5),
+      (65, 1.234), (71, 'abc'), (77, ''), (80, 'abc ( def ) ghi'),
+      (98, 'def \x00 4ghi'), (118, 'bach\\slask'), (132, 'foo\nbaa'),
+      (143, 'this % is not a comment.'), (170, 'foo\nbaa'), (180, 'foobaa'),
+      (191, ''), (194, ' '), (199, '@@ '), (211, '\xab\xcd\x00\x124\x05'),
+      (226, KWD('func')), (230, LIT('a')), (232, LIT('b')),
+      (234, KWD('{')), (235, 'c'), (238, KWD('do*')), (241, KWD('}')),
+      (242, KWD('def')), (246, KWD('[')), (248, 1), (250, 'z'), (254, KWD('!')),
+      (256, KWD(']')), (258, KWD('<<')), (261, LIT('foo')), (266, 'bar'),
+      (272, KWD('>>'))
+    ]
+
+    OBJS = [
+      (23, LIT('a')), (25, LIT('BCD')), (30, LIT('Some_Name')),
+      (41, LIT('foo_xbaa')), (54, 0), (56, 1), (59, -2), (62, 0.5),
+      (65, 1.234), (71, 'abc'), (77, ''), (80, 'abc ( def ) ghi'),
+      (98, 'def \x00 4ghi'), (118, 'bach\\slask'), (132, 'foo\nbaa'),
+      (143, 'this % is not a comment.'), (170, 'foo\nbaa'), (180, 'foobaa'),
+      (191, ''), (194, ' '), (199, '@@ '), (211, '\xab\xcd\x00\x124\x05'),
+      (230, LIT('a')), (232, LIT('b')), (234, ['c']), (246, [1, 'z']),
+      (258, {'foo': 'bar'}),
+    ]
+
+    def get_tokens(self, s):
+        import StringIO
+
+        class MyParser(PSBaseParser):
+            def flush(self):
+                self.add_results(*self.popall())
+        parser = MyParser(StringIO.StringIO(s))
+        r = []
+        try:
+            while 1:
+                r.append(parser.nexttoken())
+        except PSEOF:
+            pass
+        return r
+
+    def get_objects(self, s):
+        import StringIO
+
+        class MyParser(PSStackParser):
+            def flush(self):
+                self.add_results(*self.popall())
+        parser = MyParser(StringIO.StringIO(s))
+        r = []
+        try:
+            while 1:
+                r.append(parser.nextobject())
+        except PSEOF:
+            pass
+        return r
+
+    def test_1(self):
+        tokens = self.get_tokens(self.TESTDATA)
+        print tokens
+        self.assertEqual(tokens, self.TOKENS)
+        return
+
+    def test_2(self):
+        objs = self.get_objects(self.TESTDATA)
+        print objs
+        self.assertEqual(objs, self.OBJS)
+        return
+
+if __name__ == '__main__':
+    unittest.main()

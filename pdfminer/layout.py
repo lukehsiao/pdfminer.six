@@ -1,15 +1,7 @@
+#!/usr/bin/env python
+from utils import INF, Plane, get_bound, uniq, csort, fsplit
+from utils import bbox2str, matrix2str, apply_matrix_pt, is_diagonal
 
-from .utils import INF
-from .utils import Plane
-from .utils import get_bound
-from .utils import uniq
-from .utils import csort
-from .utils import fsplit
-from .utils import bbox2str
-from .utils import matrix2str
-from .utils import apply_matrix_pt
-
-import six # Python 2+3 compatibility
 
 ##  IndexAssigner
 ##
@@ -89,61 +81,50 @@ class LTComponent(LTItem):
         return ('<%s %s>' %
                 (self.__class__.__name__, bbox2str(self.bbox)))
 
-    # Disable comparison.
-    def __lt__(self, _):
-        raise ValueError
-    def __le__(self, _):
-        raise ValueError
-    def __gt__(self, _):
-        raise ValueError
-    def __ge__(self, _):
-        raise ValueError
-
-    def set_bbox(self, bbox):
-        (x0, y0, x1, y1) = bbox
+    def set_bbox(self, (x0, y0, x1, y1)):
         self.x0 = x0
         self.y0 = y0
         self.x1 = x1
         self.y1 = y1
         self.width = x1-x0
         self.height = y1-y0
-        self.bbox = bbox
+        self.bbox = (x0, y0, x1, y1)
         return
 
     def is_empty(self):
         return self.width <= 0 or self.height <= 0
 
     def is_hoverlap(self, obj):
-        assert isinstance(obj, LTComponent), str(type(obj))
+        assert isinstance(obj, LTComponent)
         return obj.x0 <= self.x1 and self.x0 <= obj.x1
 
     def hdistance(self, obj):
-        assert isinstance(obj, LTComponent), str(type(obj))
+        assert isinstance(obj, LTComponent)
         if self.is_hoverlap(obj):
             return 0
         else:
             return min(abs(self.x0-obj.x1), abs(self.x1-obj.x0))
 
     def hoverlap(self, obj):
-        assert isinstance(obj, LTComponent), str(type(obj))
+        assert isinstance(obj, LTComponent)
         if self.is_hoverlap(obj):
             return min(abs(self.x0-obj.x1), abs(self.x1-obj.x0))
         else:
             return 0
 
     def is_voverlap(self, obj):
-        assert isinstance(obj, LTComponent), str(type(obj))
+        assert isinstance(obj, LTComponent)
         return obj.y0 <= self.y1 and self.y0 <= obj.y1
 
     def vdistance(self, obj):
-        assert isinstance(obj, LTComponent), str(type(obj))
+        assert isinstance(obj, LTComponent)
         if self.is_voverlap(obj):
             return 0
         else:
             return min(abs(self.y0-obj.y1), abs(self.y1-obj.y0))
 
     def voverlap(self, obj):
-        assert isinstance(obj, LTComponent), str(type(obj))
+        assert isinstance(obj, LTComponent)
         if self.is_voverlap(obj):
             return min(abs(self.y0-obj.y1), abs(self.y1-obj.y0))
         else:
@@ -154,15 +135,10 @@ class LTComponent(LTItem):
 ##
 class LTCurve(LTComponent):
 
-    def __init__(self, linewidth, pts, stroke = False, fill = False, evenodd = False, stroking_color = None, non_stroking_color = None):
+    def __init__(self, linewidth, pts):
         LTComponent.__init__(self, get_bound(pts))
         self.pts = pts
         self.linewidth = linewidth
-        self.stroke = stroke
-        self.fill = fill
-        self.evenodd = evenodd
-        self.stroking_color = stroking_color
-        self.non_stroking_color = non_stroking_color
         return
 
     def get_pts(self):
@@ -173,8 +149,8 @@ class LTCurve(LTComponent):
 ##
 class LTLine(LTCurve):
 
-    def __init__(self, linewidth, p0, p1, stroke = False, fill = False, evenodd = False, stroking_color = None, non_stroking_color = None):
-        LTCurve.__init__(self, linewidth, [p0, p1], stroke, fill, evenodd, stroking_color, non_stroking_color)
+    def __init__(self, linewidth, p0, p1):
+        LTCurve.__init__(self, linewidth, [p0, p1])
         return
 
 
@@ -182,9 +158,8 @@ class LTLine(LTCurve):
 ##
 class LTRect(LTCurve):
 
-    def __init__(self, linewidth, bbox, stroke = False, fill = False, evenodd = False, stroking_color = None, non_stroking_color = None):
-        (x0, y0, x1, y1) = bbox
-        LTCurve.__init__(self, linewidth, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)], stroke, fill, evenodd, stroking_color, non_stroking_color)
+    def __init__(self, linewidth, (x0, y0, x1, y1)):
+        LTCurve.__init__(self, linewidth, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
         return
 
 
@@ -240,7 +215,7 @@ class LTChar(LTComponent, LTText):
             width = font.get_width() * fontsize
             (vx, vy) = textdisp
             if vx is None:
-                vx = width * 0.5
+                vx = width//2
             else:
                 vx = vx * fontsize * .001
             vy = (1000 - vy) * fontsize * .001
@@ -279,7 +254,7 @@ class LTChar(LTComponent, LTText):
     def get_text(self):
         return self._text
 
-    def is_compatible(self, obj):
+    def neighbor_compatible_reason(self, obj):
         """Returns True if two characters can coexist in the same line."""
         return True
 
@@ -514,13 +489,15 @@ class LTLayoutContainer(LTContainer):
                 #
                 #          |<--->|
                 #        (char_margin)
-                halign = (obj0.is_compatible(obj1) and
+                halign = (obj0.neighbor_compatible_reason(obj1) and
+                          is_diagonal(obj0.matrix) and
+                          is_diagonal(obj1.matrix) and
                           obj0.is_voverlap(obj1) and
                           (min(obj0.height, obj1.height) * laparams.line_overlap <
                            obj0.voverlap(obj1)) and
                           (obj0.hdistance(obj1) <
                            max(obj0.width, obj1.width) * laparams.char_margin))
-
+                
                 # valign: obj0 and obj1 is vertically aligned.
                 #
                 #   +------+
@@ -536,13 +513,15 @@ class LTLayoutContainer(LTContainer):
                 #     |<-->|
                 #   (line_overlap)
                 valign = (laparams.detect_vertical and
-                          obj0.is_compatible(obj1) and
+                          obj0.neighbor_compatible_reason(obj1) and
+                          not is_diagonal(obj0.matrix) and
+                          not is_diagonal(obj1.matrix) and
                           obj0.is_hoverlap(obj1) and
                           (min(obj0.width, obj1.width) * laparams.line_overlap <
                            obj0.hoverlap(obj1)) and
                           (obj0.vdistance(obj1) <
                            max(obj0.height, obj1.height) * laparams.char_margin))
-
+                
                 if ((halign and isinstance(line, LTTextLineHorizontal)) or
                     (valign and isinstance(line, LTTextLineVertical))):
                     line.add(obj1)
@@ -603,7 +582,7 @@ class LTLayoutContainer(LTContainer):
 
     # group_textboxes: group textboxes hierarchically.
     def group_textboxes(self, laparams, boxes):
-        assert boxes, str((laparams, boxes))
+        assert boxes
 
         def dist(obj1, obj2):
             """A distance function between two TextBoxes.
@@ -632,20 +611,14 @@ class LTLayoutContainer(LTContainer):
             y1 = max(obj1.y1, obj2.y1)
             objs = set(plane.find((x0, y0, x1, y1)))
             return objs.difference((obj1, obj2))
-
-        def key_obj(t):
-            (c,d,_,_) = t
-            return (c,d)
-
         # XXX this still takes O(n^2)  :(
         dists = []
-        for i in range(len(boxes)):
+        for i in xrange(len(boxes)):
             obj1 = boxes[i]
-            for j in range(i+1, len(boxes)):
+            for j in xrange(i+1, len(boxes)):
                 obj2 = boxes[j]
                 dists.append((0, dist(obj1, obj2), obj1, obj2))
-        # We could use dists.sort(), but it would randomize the test result.
-        dists = csort(dists, key=key_obj)
+        dists.sort()
         plane = Plane(self.bbox)
         plane.extend(boxes)
         while dists:
@@ -660,13 +633,13 @@ class LTLayoutContainer(LTContainer):
                 group = LTTextGroupLRTB([obj1, obj2])
             plane.remove(obj1)
             plane.remove(obj2)
-            dists = [ (c,d,obj1,obj2) for (c,d,obj1,obj2) in dists
-                      if (obj1 in plane and obj2 in plane) ]
+            # this line is optimized -- don't change without profiling
+            dists = [n for n in dists if n[2] in plane._objs and n[3] in plane._objs]
             for other in plane:
                 dists.append((0, dist(group, other), group, other))
-            dists = csort(dists, key=key_obj)
+            dists.sort()
             plane.add(group)
-        assert len(plane) == 1, str(len(plane))
+        assert len(plane) == 1
         return list(plane)
 
     def analyze(self, laparams):
@@ -681,21 +654,14 @@ class LTLayoutContainer(LTContainer):
         (empties, textlines) = fsplit(lambda obj: obj.is_empty(), textlines)
         for obj in empties:
             obj.analyze(laparams)
-        textboxes = list(self.group_textlines(laparams, textlines))
-        if -1 <= laparams.boxes_flow and laparams.boxes_flow <= +1 and textboxes:
-            self.groups = self.group_textboxes(laparams, textboxes)
-            assigner = IndexAssigner()
-            for group in self.groups:
-                group.analyze(laparams)
-                assigner.run(group)
-            textboxes.sort(key=lambda box: box.index)
-        else:
-            def getkey(box):
-                if isinstance(box, LTTextBoxVertical):
-                    return (0, -box.x1, box.y0)
-                else:
-                    return (1, box.y0, box.x0)
-            textboxes.sort(key=getkey)
+        textboxes = textlines#list(self.group_textlines(laparams, textlines))
+#         if textboxes:
+#             self.groups = self.group_textboxes(laparams, textboxes)
+#             assigner = IndexAssigner()
+#             for group in self.groups:
+#                 group.analyze(laparams)
+#                 assigner.run(group)
+#             textboxes.sort(key=lambda box: box.index)
         self._objs = textboxes + otherobjs + empties
         return
 
